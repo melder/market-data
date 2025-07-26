@@ -38,3 +38,24 @@ class Provider:
 
       case _:
         return []
+
+  def fetch_tickers(self, **kwargs: Any) -> list[dict]:
+    """
+    Fetches tickers by routing the request to the appropriate
+    provider module.
+    """
+    match self.provider:
+      case "polygon":
+        if not self.api_key:
+          raise ValueError("API key is required for the Polygon provider.")
+        return polygon.get_tickers(api_key=self.api_key, **kwargs)
+
+      case "alpha_vantage":
+        if not self.api_key:
+          raise ValueError("API key is required for the Alpha Vantage provider.")
+        return alpha_vantage.get_tickers(api_key=self.api_key, **kwargs)
+      case "yfinance":
+        # yfinance provider fetches from a public NASDAQ list and needs no key.
+        return yfinance.get_tickers(**kwargs)
+      case _:
+        return []
