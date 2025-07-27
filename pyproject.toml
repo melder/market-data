@@ -1,5 +1,15 @@
 # This is a TOML file.
 
+[project]
+name = "tickers"
+version = "0.1.0"
+dependencies = [
+    "python-dotenv",
+    "requests",
+    "pandas",
+    "yfinance",
+]
+
 # Section for Ruff's general settings
 [tool.ruff]
 # The user-facing setting for line width is `line-length`.

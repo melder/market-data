@@ -1,61 +1,49 @@
 from typing import Any
 
-from providers import alpha_vantage, polygon, yfinance
+# NOTE: This refactor assumes you will create these classes in their respective files.
+# For example, a `PolygonProvider` class inside `providers/polygon.py`.
+from models import Candle, Ticker
+from providers.alpha_vantage import AlphaVantageProvider
+from providers.interface import DataProvider
+from providers.polygon import PolygonProvider
+from providers.yfinance import YFinanceProvider
+
+# A mapping from provider names to their corresponding strategy classes.
+_PROVIDER_STRATEGIES: dict[str, type[DataProvider]] = {
+  "polygon": PolygonProvider,
+  "alpha_vantage": AlphaVantageProvider,
+  "yfinance": YFinanceProvider,
+}
+
+# A set of providers that require an API key.
+_PROVIDERS_REQUIRING_KEY = {"polygon", "alpha_vantage"}
 
 
 class Provider:
   """
-  A simple facade for accessing data from different providers.
+  A context class that uses a specific data provider strategy to fetch data.
+  This class implements the Strategy design pattern.
   """
 
+  _strategy: DataProvider
+
   def __init__(self, provider: str, api_key: str | None = None):
-    if provider not in ["polygon", "alpha_vantage", "yfinance"]:
+    if provider not in _PROVIDER_STRATEGIES:
       raise ValueError(f"Provider '{provider}' is not supported.")
 
-    self.provider = provider
-    self.api_key = api_key
+    strategy_class = _PROVIDER_STRATEGIES[provider]
 
-  def fetch_candles(self, **kwargs: Any) -> list[dict]:
-    """
-    Fetches candle data by routing the request to the appropriate
-    provider module.
-    """
-    match self.provider:
-      case "polygon":
-        if not self.api_key:
-          raise ValueError("API key is required for the Polygon provider.")
-        return polygon.get_candles(api_key=self.api_key, **kwargs)
+    # Instantiate the chosen strategy. The strategy class itself is now
+    # responsible for validating the API key if it needs one.
+    if provider in _PROVIDERS_REQUIRING_KEY:
+      self._strategy = strategy_class(api_key=api_key)
+    else:
+      self._strategy = strategy_class()
 
-      case "alpha_vantage":
-        if not self.api_key:
-          raise ValueError("API key is required for the Alpha Vantage provider.")
-        return alpha_vantage.get_candles(api_key=self.api_key, **kwargs)
+  def fetch_candles(self, **kwargs: Any) -> list[Candle]:
+    """Fetches candle data using the selected provider strategy."""
+    return self._strategy.get_candles(**kwargs)
 
-      # 3. Add the new case for yfinance
-      case "yfinance":
-        # yfinance does not require an API key
-        return yfinance.get_candles(**kwargs)
-
-      case _:
-        return []
-
-  def fetch_tickers(self, **kwargs: Any) -> list[dict]:
-    """
-    Fetches tickers by routing the request to the appropriate
-    provider module.
-    """
-    match self.provider:
-      case "polygon":
-        if not self.api_key:
-          raise ValueError("API key is required for the Polygon provider.")
-        return polygon.get_tickers(api_key=self.api_key, **kwargs)
-
-      case "alpha_vantage":
-        if not self.api_key:
-          raise ValueError("API key is required for the Alpha Vantage provider.")
-        return alpha_vantage.get_tickers(api_key=self.api_key, **kwargs)
-      case "yfinance":
-        # yfinance provider fetches from a public NASDAQ list and needs no key.
-        return yfinance.get_tickers(**kwargs)
-      case _:
-        return []
+  def fetch_tickers(self, **kwargs: Any) -> list[Ticker]:
+    """Fetches tickers using the selected provider strategy."""
+    return self._strategy.get_tickers(**kwargs)
