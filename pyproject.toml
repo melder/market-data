@@ -4,11 +4,17 @@
 name = "tickers"
 version = "0.1.0"
 dependencies = [
+    "click",
     "python-dotenv",
+    "alpha_vantage",
+    "polygon-api-client",
     "requests",
     "pandas",
     "yfinance",
 ]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 # Section for Ruff's general settings
 [tool.ruff]

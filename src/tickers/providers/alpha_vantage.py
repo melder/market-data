@@ -9,7 +9,7 @@ import requests
 from alpha_vantage.timeseries import TimeSeries
 from pandas.errors import ParserError
 
-from models import Candle, Ticker
+from tickers.models import Candle, Ticker
 
 
 def _transform_ticker_data(df: pd.DataFrame) -> list[Ticker]:

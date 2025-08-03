@@ -6,7 +6,7 @@ from typing import Any
 from polygon import RESTClient
 from requests.exceptions import HTTPError
 
-from models import Candle, Ticker
+from tickers.models import Candle, Ticker
 
 
 class PolygonProvider:

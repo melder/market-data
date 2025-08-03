@@ -1,6 +1,6 @@
 from typing import Any, Protocol
 
-from models import Candle, Ticker
+from tickers.models import Candle, Ticker
 
 
 class DataProvider(Protocol):

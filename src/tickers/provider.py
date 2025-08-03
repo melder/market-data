@@ -2,11 +2,11 @@ from typing import Any
 
 # NOTE: This refactor assumes you will create these classes in their respective files.
 # For example, a `PolygonProvider` class inside `providers/polygon.py`.
-from models import Candle, Ticker
-from providers.alpha_vantage import AlphaVantageProvider
-from providers.interface import DataProvider
-from providers.polygon import PolygonProvider
-from providers.yfinance import YFinanceProvider
+from tickers.models import Candle, Ticker
+from tickers.providers.alpha_vantage import AlphaVantageProvider
+from tickers.providers.interface import DataProvider
+from tickers.providers.polygon import PolygonProvider
+from tickers.providers.yfinance import YFinanceProvider
 
 # A mapping from provider names to their corresponding strategy classes.
 _PROVIDER_STRATEGIES: dict[str, type[DataProvider]] = {

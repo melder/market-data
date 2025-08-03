@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 import yfinance as yf
 
-from models import Candle, Ticker
+from tickers.models import Candle, Ticker
 
 
 class YFinanceProvider:
@@ -37,7 +37,7 @@ class YFinanceProvider:
     if df.empty:
       return []
     # The last row is a footer/summary row which should be removed.
-    df = df.iloc[:-1]
+    df = df.copy().iloc[:-1]
 
     # Standardize column names
     rename_map = {ticker_col: "ticker", name_col: "name"}
