@@ -51,11 +51,22 @@ def _get_tickers_impl(client: RESTClient, **kwargs: Any) -> list[Ticker]:
   """Fetches all available tickers from Polygon.io with rate-limiting."""
   all_tickers = []
   tickers_processed = 0
+
+  # Get the type to exclude from the arguments
+  exclude_type = kwargs.get("exclude_type")
+  if exclude_type:
+    logging.info(f"Polygon provider will exclude tickers of type '{exclude_type}'.")
+
   try:
     for t in client.list_tickers(limit=_TICKERS_PAGE_LIMIT, market="stocks"):
       try:
-        # Pydantic validates the object from the SDK.
-        all_tickers.append(Ticker.model_validate(t))
+        validated_ticker = Ticker.model_validate(t)
+
+        # This is the new filtering logic
+        if exclude_type and validated_ticker.type == exclude_type:
+          continue  # Skip this ticker
+
+        all_tickers.append(validated_ticker)
       except ValidationError as e:
         ticker_symbol = getattr(t, "ticker", "UNKNOWN")
         logging.warning(
