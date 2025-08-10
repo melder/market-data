@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import functools
 import logging
 import time
 from typing import Any
 
 from polygon import RESTClient
+from pydantic import ValidationError
 from requests.exceptions import HTTPError
 
 from market_data.interfaces import CandlesFetcher, TickersFetcher
@@ -13,37 +16,6 @@ from market_data.models import Candle, Ticker
 _MAX_CANDLE_LIMIT = 50000
 _TICKERS_PAGE_LIMIT = 1000
 _RATE_LIMIT_PAUSE_SECONDS = 12
-
-# --- Private Helper Functions for Data Mapping ---
-
-
-def _map_api_agg_to_candle(agg: Any) -> Candle:
-  """Maps a Polygon.io aggregate object to a Candle model."""
-  return Candle(
-    open=agg.open,
-    high=agg.high,
-    low=agg.low,
-    close=agg.close,
-    volume=agg.volume,
-    timestamp=agg.timestamp,
-  )
-
-
-def _map_api_ticker_to_ticker(t: Any) -> Ticker:
-  """Maps a Polygon.io ticker object to a Ticker model."""
-  return Ticker(
-    ticker=t.ticker,
-    name=t.name,
-    market=t.market,
-    locale=t.locale,
-    primary_exchange=t.primary_exchange,
-    type=t.type,
-    active=t.active,
-    currency_name=t.currency_name,
-    cik=t.cik,
-    last_updated_utc=t.last_updated_utc,
-  )
-
 
 # --- Private Fetcher Implementations ---
 
@@ -59,7 +31,17 @@ def _get_candles_impl(client: RESTClient, **kwargs: Any) -> list[Candle]:
       to=kwargs["to_date"],
       limit=_MAX_CANDLE_LIMIT,
     )
-    return [_map_api_agg_to_candle(agg) for agg in resp]
+
+    valid_candles = []
+    for agg in resp:
+      try:
+        # Pydantic can validate directly from the SDK's object attributes.
+        valid_candles.append(Candle.model_validate(agg))
+      except ValidationError as e:
+        logging.warning(
+          f"Skipping polygon candle for {kwargs['ticker']} due to validation error: {e}"
+        )
+    return valid_candles
   except Exception as e:
     logging.error(f"Error with Polygon.io get_candles: {e}", exc_info=True)
     return []
@@ -71,9 +53,17 @@ def _get_tickers_impl(client: RESTClient, **kwargs: Any) -> list[Ticker]:
   tickers_processed = 0
   try:
     for t in client.list_tickers(limit=_TICKERS_PAGE_LIMIT, market="stocks"):
-      all_tickers.append(_map_api_ticker_to_ticker(t))
+      try:
+        # Pydantic validates the object from the SDK.
+        all_tickers.append(Ticker.model_validate(t))
+      except ValidationError as e:
+        ticker_symbol = getattr(t, "ticker", "UNKNOWN")
+        logging.warning(
+          f"Skipping polygon ticker '{ticker_symbol}' due to validation error: {e}"
+        )
+
       tickers_processed += 1
-      if tickers_processed % _TICKERS_PAGE_LIMIT == 0:
+      if tickers_processed > 0 and tickers_processed % _TICKERS_PAGE_LIMIT == 0:
         logging.info(f"Processed {len(all_tickers)} tickers. Pausing for rate limit...")
         time.sleep(_RATE_LIMIT_PAUSE_SECONDS)
   except HTTPError as e:
@@ -99,7 +89,6 @@ class PolygonProvider:
 
     client = RESTClient(api_key)
 
-    # Use functools.partial to "pre-load" the client into the fetcher functions.
     self._capabilities = {
       TickersFetcher: functools.partial(_get_tickers_impl, client=client),
       CandlesFetcher: functools.partial(_get_candles_impl, client=client),

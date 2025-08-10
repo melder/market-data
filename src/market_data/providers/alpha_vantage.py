@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from market_data.interfaces import CandlesFetcher, TickersFetcher
 from market_data.models import Candle, Ticker
-from market_data.utils.parsers import read_csv_from_buffer
+from market_data.utils.parsers import read_csv_with_conventions
 
 
 def _parse_tickers_from_raw(df: pd.DataFrame) -> list[Ticker]:
@@ -56,7 +56,7 @@ def _get_tickers_impl(api_key: str, **kwargs: Any) -> list[Ticker]:
   try:
     response = requests.get(url, timeout=30)
     response.raise_for_status()
-    df = read_csv_from_buffer(io.StringIO(response.text))
+    df = read_csv_with_conventions(io.StringIO(response.text))
     return _parse_tickers_from_raw(df)
   except ParserError:
     logging.error(f"Failed to parse CSV from Alpha Vantage: {response.text}")

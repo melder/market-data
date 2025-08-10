@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import math
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Candle(BaseModel):
   """Represents a single OHLCV candle with Pydantic validation."""
+
+  model_config = ConfigDict(from_attributes=True)
 
   open: float
   high: float
@@ -18,6 +20,8 @@ class Candle(BaseModel):
 
 class Ticker(BaseModel):
   """Represents a stock ticker with Pydantic validation."""
+
+  model_config = ConfigDict(from_attributes=True)
 
   ticker: str
   name: str | None = None

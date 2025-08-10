@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 import logging
 from typing import Any
 
 import pandas as pd
 import yfinance as yf
+from pydantic import ValidationError
 
 from market_data.interfaces import CandlesFetcher, TickersFetcher
 from market_data.models import Candle, Ticker
+from market_data.utils.parsers import read_csv_with_conventions
 
 # --- Ticker Fetching Logic ---
 
@@ -24,16 +28,43 @@ _EXCHANGE_SOURCES = {
 
 
 def _get_tickers_impl(**kwargs: Any) -> list[Ticker]:
-  exchange = kwargs.get("exchange", "nasdaq")
-  source_info = _EXCHANGE_SOURCES[exchange]
-  try:
-    df = pd.read_csv(source_info["url"], sep="|")
-    return _process_ticker_dataframe(
-      df, source_info["ticker_col"], source_info["name_col"]
+  exchange = kwargs.get("exchange")
+
+  if exchange:
+    # If a specific exchange is requested, put it in a list to be processed.
+    exchanges_to_fetch = [exchange]
+  else:
+    # If no exchange is specified, fetch from all configured sources.
+    logging.info(
+      f"No exchange specified for yfinance. Fetching from all sources: {list(_EXCHANGE_SOURCES.keys())}"
     )
-  except Exception as e:
-    logging.error(f"Error fetching tickers for '{exchange}': {e}", exc_info=True)
-    return []
+    exchanges_to_fetch = _EXCHANGE_SOURCES.keys()
+
+  all_tickers = []
+  for exch_name in exchanges_to_fetch:
+    source_info = _EXCHANGE_SOURCES.get(exch_name)
+    if not source_info:
+      logging.warning(
+        f"yfinance exchange '{exch_name}' not found in configuration. Skipping."
+      )
+      continue
+
+    try:
+      logging.info(f"Fetching yfinance tickers for exchange: {exch_name}")
+      df = read_csv_with_conventions(source_info["url"], sep="|")
+      tickers = _process_ticker_dataframe(
+        df, source_info["ticker_col"], source_info["name_col"]
+      )
+      all_tickers.extend(tickers)
+    except Exception as e:
+      logging.error(
+        f"Failed to fetch tickers for yfinance exchange '{exch_name}': {e}",
+        exc_info=True,
+      )
+      # Continue to the next exchange even if one fails
+      continue
+
+  return all_tickers
 
 
 def _process_ticker_dataframe(
@@ -41,22 +72,26 @@ def _process_ticker_dataframe(
 ) -> list[Ticker]:
   if df.empty:
     return []
-  df = df.copy().iloc[:-1]
+
+  # This line removes the footer from the raw data.
+  df = df.iloc[:-1]
+
   df = df.rename(columns={ticker_col: "ticker", name_col: "name"})
   df["active"] = (
     (df["Financial Status"] == "N") if "Financial Status" in df.columns else True
   )
-  return [
-    Ticker(
-      ticker=row.ticker,
-      name=row.name,
-      active=row.active,
-      primary_exchange=getattr(row, "Exchange", None),
-      market="stocks",
-      locale="us",
-    )
-    for row in df.itertuples(index=False)
-  ]
+
+  valid_tickers = []
+  for row in df.itertuples(index=False):
+    try:
+      # Convert row to dict and validate with Pydantic
+      valid_tickers.append(Ticker.model_validate(row._asdict()))
+    except ValidationError as e:
+      ticker_symbol = getattr(row, "ticker", "UNKNOWN")
+      logging.warning(
+        f"Skipping yfinance ticker '{ticker_symbol}' due to validation error: {e}"
+      )
+  return valid_tickers
 
 
 # --- Candle Fetching Logic ---
@@ -79,17 +114,24 @@ def _get_candles_impl(**kwargs: Any) -> list[Candle]:
     )
     if df.empty:
       return []
-    return [
-      Candle(
-        open=r.Open,
-        high=r.High,
-        low=r.Low,
-        close=r.Close,
-        volume=r.Volume,
-        timestamp=int(r.Index.timestamp() * 1000),
-      )
-      for r in df.itertuples()
-    ]
+
+    valid_candles = []
+    for row in df.itertuples():
+      try:
+        candle_data = {
+          "open": row.Open,
+          "high": row.High,
+          "low": row.Low,
+          "close": row.Close,
+          "volume": row.Volume,
+          "timestamp": int(row.Index.timestamp() * 1000),
+        }
+        valid_candles.append(Candle.model_validate(candle_data))
+      except (ValidationError, AttributeError) as e:
+        logging.warning(
+          f"Skipping yfinance candle for {kwargs['ticker']} due to validation error: {e}"
+        )
+    return valid_candles
   except Exception as e:
     logging.error(f"Error with yfinance get_candles: {e}", exc_info=True)
     return []

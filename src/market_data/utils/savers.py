@@ -13,15 +13,15 @@ def save_to_csv(data: list[dict[str, Any]], filename: str) -> None:
     logging.warning("No data provided to write to CSV.")
     return
 
+  output_path = OUTPUT_DIR / filename
   try:
-    # Ensure the output directory exists using pathlib.
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Create the full path for the output file using pathlib's / operator.
-    output_path = OUTPUT_DIR / filename
-
     df = pd.DataFrame(data)
     df.to_csv(output_path, index=False, encoding="utf-8")
     logging.info(f"Data successfully written to {output_path}")
+  except (OSError, PermissionError) as e:
+    # Catch specific file system errors.
+    logging.error(f"A file system error occurred while writing to {output_path}: {e}")
   except Exception as e:
-    logging.error(f"An error occurred while writing to {output_path}: {e}")
+    # Catch any other unexpected errors.
+    logging.error(f"An unexpected error occurred while writing to {output_path}: {e}")
