@@ -1,12 +1,9 @@
+from __future__ import annotations
+
 import importlib
 import os
 from dataclasses import dataclass
 from enum import Enum, auto
-
-
-class ProviderType(Enum):
-  API = auto()
-  SCRAPER = auto()
 
 
 class Tier(Enum):
@@ -17,37 +14,34 @@ class Tier(Enum):
 @dataclass
 class ProviderMetadata:
   class_path: str
-  type: ProviderType
   tier: Tier
   api_key_env_var: str | None = None
   rate_limit_per_minute: int | None = None
 
 
-# The registry is updated to include the new provider.
 _PROVIDERS = {
   "yfinance": ProviderMetadata(
-    class_path="market_data.providers.yfinance.YFinanceProvider",
-    type=ProviderType.API,
-    tier=Tier.FREE,
+    class_path="market_data.providers.yfinance.YFinanceProvider", tier=Tier.FREE
   ),
   "polygon": ProviderMetadata(
     class_path="market_data.providers.polygon.PolygonProvider",
-    type=ProviderType.API,
     tier=Tier.PREMIUM,
     api_key_env_var="POLYGON_API_KEY",
   ),
   "alpha_vantage": ProviderMetadata(
     class_path="market_data.providers.alpha_vantage.AlphaVantageProvider",
-    type=ProviderType.API,
     tier=Tier.FREE,
     api_key_env_var="ALPHA_VANTAGE_API_KEY",
+  ),
+  "sec": ProviderMetadata(
+    class_path="market_data.providers.sec.SecProvider", tier=Tier.FREE
   ),
 }
 
 
 class ProviderFactory:
   @staticmethod
-  def _import_from_string(path: str):
+  def _import_from_string(path: str) -> type:
     """Helper to dynamically import a class from a string path."""
     module_name, class_name = path.rsplit(".", 1)
     module = importlib.import_module(module_name)
