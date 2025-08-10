@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import io
 import logging
@@ -8,31 +10,32 @@ import pandas as pd
 import requests
 from alpha_vantage.timeseries import TimeSeries
 from pandas.errors import ParserError
+from pydantic import ValidationError
 
 from market_data.interfaces import CandlesFetcher, TickersFetcher
 from market_data.models import Candle, Ticker
-
-# --- Private Helper Functions for Data Mapping ---
+from market_data.utils.parsers import read_csv_from_buffer
 
 
 def _parse_tickers_from_raw(df: pd.DataFrame) -> list[Ticker]:
-  """Transforms a raw DataFrame into a list of Ticker data objects."""
+  """Transforms and validates a raw DataFrame into a list of Ticker objects."""
   if df.empty:
     return []
   df = df.rename(
     columns={"symbol": "ticker", "assetType": "type", "exchange": "primary_exchange"}
   )
   df["active"] = df["status"] == "Active"
-  return [
-    Ticker(
-      ticker=row.ticker,
-      name=row.name,
-      active=row.active,
-      primary_exchange=getattr(row, "primary_exchange", None),
-      type=getattr(row, "type", None),
-    )
-    for row in df.itertuples(index=False)
-  ]
+
+  valid_tickers = []
+  for row in df.itertuples(index=False):
+    try:
+      # Convert the row to a dictionary before validation.
+      valid_tickers.append(Ticker.model_validate(row._asdict()))
+    except ValidationError as e:
+      ticker_symbol = getattr(row, "ticker", "UNKNOWN")
+      logging.warning(f"Skipping ticker '{ticker_symbol}' due to validation error: {e}")
+
+  return valid_tickers
 
 
 def _map_api_candle_to_candle(date_str: str, daily_data: dict) -> Candle:
@@ -48,23 +51,16 @@ def _map_api_candle_to_candle(date_str: str, daily_data: dict) -> Candle:
   )
 
 
-# --- Private Fetcher Implementations ---
-
-
 def _get_tickers_impl(api_key: str, **kwargs: Any) -> list[Ticker]:
-  """Fetches a list of active stock tickers from Alpha Vantage."""
   url = f"https://www.alphavantage.co/query?function=LISTING_STATUS&apikey={api_key}"
   try:
     response = requests.get(url, timeout=30)
     response.raise_for_status()
-    try:
-      df = pd.read_csv(io.StringIO(response.text))
-    except ParserError:
-      logging.error(
-        f"Failed to parse CSV from Alpha Vantage (API limit?): {response.text}"
-      )
-      return []
+    df = read_csv_from_buffer(io.StringIO(response.text))
     return _parse_tickers_from_raw(df)
+  except ParserError:
+    logging.error(f"Failed to parse CSV from Alpha Vantage: {response.text}")
+    return []
   except requests.exceptions.RequestException as e:
     logging.error(f"HTTP error fetching Alpha Vantage tickers: {e}", exc_info=True)
     return []
@@ -77,12 +73,16 @@ def _get_candles_impl(ts_client: TimeSeries, **kwargs: Any) -> list[Candle]:
       symbol=kwargs["ticker"], outputsize=kwargs.get("outputsize", "compact")
     )
     return [_map_api_candle_to_candle(d, v) for d, v in data.items()]
-  except Exception as e:
-    logging.error(f"Error with Alpha Vantage get_candles: {e}", exc_info=True)
+  except ValidationError as e:
+    # This is an expected error if the API returns malformed data.
+    logging.warning(f"Alpha Vantage data failed validation for {kwargs['ticker']}: {e}")
     return []
-
-
-# --- Public Provider Class ---
+  except Exception as e:
+    # This is for unexpected errors (e.g., rate limits, network issues).
+    logging.error(
+      f"An unexpected error occurred with Alpha Vantage get_candles: {e}", exc_info=True
+    )
+    return []
 
 
 class AlphaVantageProvider:
