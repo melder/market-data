@@ -9,7 +9,7 @@ import click
 from dotenv import load_dotenv
 
 from market_data.factory import ProviderFactory
-from market_data.interfaces import CandlesFetcher, TickersFetcher
+from market_data.interfaces import CandlesFetcher, OptionableFetcher, TickersFetcher
 from market_data.utils.savers import save_to_csv
 
 # --- Setup ---
@@ -119,6 +119,30 @@ def fetch_candles(provider, ticker, from_date, to_date, timespan, multiplier):
   filename = f"{provider}_{ticker}_candles_{from_date}_to_{to_date}.csv"
   logging.info(f"Saving {len(candles)} candles to {filename}...")
   save_to_csv([c.model_dump() for c in candles], filename)
+
+
+@cli.command()
+@click.option(
+  "--provider", required=True, help="The data provider to use (e.g., cboe)."
+)
+@click.option(
+  "--type", default="all", help="Type of options symbols: all, weeklies, quarterlies (CBOE only)."
+)
+@cli_error_handler
+def fetch_optionable_tickers(provider, type):
+  """Fetch a list of optionable tickers from a provider."""
+  logging.info(f"Executing 'fetch-optionable-tickers' for provider: {provider}")
+
+  get_optionable_func = _get_fetcher(provider, OptionableFetcher)
+  tickers = get_optionable_func(type=type)
+
+  if not tickers:
+    logging.warning("No optionable tickers were fetched.")
+    return
+
+  filename = f"{provider}_{type}_optionable_tickers.csv"
+  logging.info(f"Saving {len(tickers)} optionable tickers to {filename}...")
+  save_to_csv([t.model_dump() for t in tickers], filename)
 
 
 if __name__ == "__main__":

@@ -16,3 +16,10 @@ class CandlesFetcher(ABC):
   def get_candles(self, **kwargs: Any) -> list[Candle]:
     """Fetches candle (OHLCV) data for a ticker."""
     pass
+
+
+class OptionableFetcher(ABC):
+  @abstractmethod
+  def get_optionable_tickers(self, **kwargs: Any) -> list[Ticker]:
+    """Fetches a list of optionable stock tickers."""
+    pass

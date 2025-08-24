@@ -36,6 +36,9 @@ _PROVIDERS = {
   "sec": ProviderMetadata(
     class_path="market_data.providers.sec.SecProvider", tier=Tier.FREE
   ),
+  "cboe": ProviderMetadata(
+    class_path="market_data.providers.cboe.CboeProvider", tier=Tier.FREE
+  ),
 }
 
 

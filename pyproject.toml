@@ -19,6 +19,7 @@ package-dir = {"" = "src"}
 
 # Section for Ruff's general settings
 [tool.ruff]
+fix = true
 # The user-facing setting for line width is `line-length`.
 line-length = 88
 # The target Python version.
@@ -38,6 +39,7 @@ exclude = []
 # "UP" = pyupgrade (finds outdated syntax)
 # "B" = flake8-bugbear (finds likely bugs)
 select = ["E", "F", "W", "I", "N", "UP", "B"]
+extend-select = ["W292"]  # missing-final-newline
 
 # Ignore specific rule codes across the entire project.
 # E501 is the "line too long" error, which is often handled by a formatter like Black.
