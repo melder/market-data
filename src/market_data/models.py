@@ -33,11 +33,18 @@ class Ticker(BaseModel):
   currency_name: str | None = Field(default=None, alias="currencyName")
   cik: str | None = None
   last_updated_utc: str | None = Field(default=None, alias="lastUpdatedUtc")
-  optionable: bool | None = None
+  optionable: bool | None = Field(
+    default=None, description="Whether the ticker has options available for trading"
+  )
 
   @field_validator("name", mode="before")
+  @classmethod
   def clean_name(cls, v: any) -> str | None:  # noqa: N805
-    """Converts float NaN values to None for the name field."""
+    """Converts float NaN values to None for the name field.
+
+    This is necessary when parsing CSV data where missing company names
+    are represented as NaN values by pandas.
+    """
     if isinstance(v, float) and math.isnan(v):
       return None
     return v

@@ -42,7 +42,7 @@ def cli_error_handler(func):
 # --- Private Helper ---
 
 
-def _get_fetcher(provider_name: str, interface_class: type):
+def _get_fetcher(provider_name: str, interface_class: type) -> callable:
   """Helper to create a provider and get a specific fetcher component."""
   factory = ProviderFactory()
   data_provider = factory.create(provider_name)
@@ -126,21 +126,24 @@ def fetch_candles(provider, ticker, from_date, to_date, timespan, multiplier):
   "--provider", required=True, help="The data provider to use (e.g., cboe)."
 )
 @click.option(
-  "--type", default="all", help="Type of options symbols: all, weeklies, quarterlies (CBOE only)."
+  "--type",
+  "option_type",
+  default="all",
+  help="Type of options symbols: all, weeklies, quarterlies (CBOE only).",
 )
 @cli_error_handler
-def fetch_optionable_tickers(provider, type):
+def fetch_optionable_tickers(provider: str, option_type: str) -> None:
   """Fetch a list of optionable tickers from a provider."""
   logging.info(f"Executing 'fetch-optionable-tickers' for provider: {provider}")
 
   get_optionable_func = _get_fetcher(provider, OptionableFetcher)
-  tickers = get_optionable_func(type=type)
+  tickers = get_optionable_func(type=option_type)
 
   if not tickers:
     logging.warning("No optionable tickers were fetched.")
     return
 
-  filename = f"{provider}_{type}_optionable_tickers.csv"
+  filename = f"{provider}_{option_type}_optionable_tickers.csv"
   logging.info(f"Saving {len(tickers)} optionable tickers to {filename}...")
   save_to_csv([t.model_dump() for t in tickers], filename)
 

@@ -37,20 +37,22 @@ _PROVIDERS = {
     class_path="market_data.providers.sec.SecProvider", tier=Tier.FREE
   ),
   "cboe": ProviderMetadata(
-    class_path="market_data.providers.cboe.CboeProvider", tier=Tier.FREE
+    class_path="market_data.providers.cboe.CboeProvider",
+    tier=Tier.FREE,
+    rate_limit_per_minute=60,  # Conservative rate limit for web scraping
   ),
 }
 
 
 class ProviderFactory:
   @staticmethod
-  def _import_from_string(path: str) -> type:
+  def _import_from_string(path: str) -> type[object]:
     """Helper to dynamically import a class from a string path."""
     module_name, class_name = path.rsplit(".", 1)
     module = importlib.import_module(module_name)
     return getattr(module, class_name)
 
-  def create(self, provider_name: str):
+  def create(self, provider_name: str) -> object:
     """Creates a provider instance based on its registered name."""
     metadata = _PROVIDERS.get(provider_name)
     if not metadata:
