@@ -9,13 +9,15 @@ from polygon import RESTClient
 from pydantic import ValidationError
 from requests.exceptions import HTTPError
 
-from market_data.interfaces import CandlesFetcher, TickersFetcher
+from market_data.interfaces import CandlesFetcher, OptionableFetcher, TickersFetcher
 from market_data.models import Candle, Ticker
 
 # --- Module-level Constants ---
 _MAX_CANDLE_LIMIT = 50000
 _TICKERS_PAGE_LIMIT = 1000
 _RATE_LIMIT_PAUSE_SECONDS = 12
+_OPTIONS_CONTRACTS_LIMIT = 1000  # Max per request for options contracts
+_MAX_RETRIES = 3  # Max retry attempts for rate limited requests
 
 # --- Private Fetcher Implementations ---
 
@@ -90,6 +92,52 @@ def _get_tickers_impl(client: RESTClient, **kwargs: Any) -> list[Ticker]:
   return all_tickers
 
 
+def _get_optionable_tickers_impl(client: RESTClient, **kwargs: Any) -> list[Ticker]:
+  """Fetches optionable ticker symbols from Polygon.io options contracts API.
+
+  Args:
+    client: Polygon RESTClient instance
+    **kwargs: Additional keyword arguments
+
+  Returns:
+    List of Ticker objects with optionable=True
+  """
+  contracts_processed = 0
+  unique_tickers = set()
+
+  # TODO: Handle rate limiting during pagination - currently if rate limit occurs
+  # during SDK's internal pagination, the entire operation fails and we lose all progress
+  for contract in client.list_options_contracts(limit=_OPTIONS_CONTRACTS_LIMIT):
+    underlying = getattr(contract, "underlying_ticker", None)
+    if underlying:
+      unique_tickers.add(underlying)
+
+    contracts_processed += 1
+    if contracts_processed > 0 and contracts_processed % _TICKERS_PAGE_LIMIT == 0:
+      logging.info(
+        f"Processed {contracts_processed} contracts. Pausing for rate limit..."
+      )
+      time.sleep(_RATE_LIMIT_PAUSE_SECONDS)
+
+  logging.info(f"Found {len(unique_tickers)} unique optionable tickers")
+
+  valid_tickers = []
+  for ticker_symbol in sorted(unique_tickers):
+    try:
+      ticker_obj = Ticker(
+        ticker=ticker_symbol,
+        name=None,  # Options contracts don't include company names
+        active=True,
+        optionable=True,
+      )
+      valid_tickers.append(ticker_obj)
+    except ValidationError as e:
+      logging.warning(f"Skipping ticker '{ticker_symbol}' due to validation error: {e}")
+
+  logging.info(f"Successfully processed {len(valid_tickers)} optionable tickers")
+  return valid_tickers
+
+
 # --- Public Provider Class ---
 
 
@@ -103,6 +151,7 @@ class PolygonProvider:
     self._capabilities = {
       TickersFetcher: functools.partial(_get_tickers_impl, client=client),
       CandlesFetcher: functools.partial(_get_candles_impl, client=client),
+      OptionableFetcher: functools.partial(_get_optionable_tickers_impl, client=client),
     }
 
   def supports(self, interface_class: type) -> bool:

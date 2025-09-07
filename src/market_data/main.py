@@ -123,7 +123,7 @@ def fetch_candles(provider, ticker, from_date, to_date, timespan, multiplier):
 
 @cli.command()
 @click.option(
-  "--provider", required=True, help="The data provider to use (e.g., cboe)."
+  "--provider", required=True, help="The data provider to use (e.g., cboe, yfinance)."
 )
 @click.option(
   "--type",
@@ -131,19 +131,46 @@ def fetch_candles(provider, ticker, from_date, to_date, timespan, multiplier):
   default="all",
   help="Type of options symbols: all, weeklies, quarterlies (CBOE only).",
 )
+@click.option(
+  "--exchange", help="The exchange to filter by (for providers that support it)."
+)
+@click.option(
+  "--max-tickers",
+  type=int,
+  help="Maximum number of tickers to check (for testing with yfinance).",
+)
+@click.option(
+  "--delay",
+  type=float,
+  default=1.5,
+  help="Delay in seconds between requests (yfinance only, default: 1.5).",
+)
 @cli_error_handler
-def fetch_optionable_tickers(provider: str, option_type: str) -> None:
+def fetch_optionable_tickers(
+  provider: str, option_type: str, exchange: str, max_tickers: int, delay: float
+) -> None:
   """Fetch a list of optionable tickers from a provider."""
   logging.info(f"Executing 'fetch-optionable-tickers' for provider: {provider}")
 
   get_optionable_func = _get_fetcher(provider, OptionableFetcher)
-  tickers = get_optionable_func(type=option_type)
+
+  # Build kwargs based on provider
+  kwargs = {"type": option_type}
+  if exchange:
+    kwargs["exchange"] = exchange
+  if max_tickers:
+    kwargs["max_tickers"] = max_tickers
+  if provider == "yfinance":
+    kwargs["delay"] = delay
+
+  tickers = get_optionable_func(**kwargs)
 
   if not tickers:
     logging.warning("No optionable tickers were fetched.")
     return
 
-  filename = f"{provider}_{option_type}_optionable_tickers.csv"
+  suffix = f"_{max_tickers}" if max_tickers else ""
+  filename = f"{provider}_{option_type}_optionable_tickers{suffix}.csv"
   logging.info(f"Saving {len(tickers)} optionable tickers to {filename}...")
   save_to_csv([t.model_dump() for t in tickers], filename)
 
