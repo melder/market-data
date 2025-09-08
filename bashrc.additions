@@ -1,0 +1,18 @@
+export PS1="\[\e[32m\]🤖 clco@rails\[\e[m\]:\[\e[34m\]\w\[\e[m\]$ "
+alias ll="ls -alF"
+alias la="ls -A"
+alias l="ls -CF"
+export EDITOR=nano
+export PATH=~/.npm-global/bin:$PATH
+
+# Show startup message
+if [ -n "$SSH_TTY" ] || [ -n "$TERM_PROGRAM" ] || [ "$SHLVL" -eq 1 -a -t 0 ]; then
+  if [ ! -f /tmp/.shownstartup$$ ]; then
+    echo "🚀 Claude Code Dev Container Ready!"
+    echo ""
+    echo "Quick commands:"
+    echo "  claude - Start Claude Code"
+    echo ""
+    touch /tmp/.shownstartup$$
+  fi
+fi

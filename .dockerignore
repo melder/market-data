@@ -1,0 +1,9 @@
+.git
+.env
+.vscode
+.DS_Store
+Dockerfile.claude
+docker-claude-compose.yml
+
+tmp/*
+!tmp/.keep

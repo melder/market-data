@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude
+    container_name: clco-dev
+    environment:
+      HISTFILE: /app/tmp/clco/.bash_history
+      CLAUDE_CONFIG_DIR: /app/tmp/clco/.claude
+      TERM: xterm-256color
+      COLORTERM: truecolor
+    volumes:
+      - .:/app
+    tty: true
+    init: true

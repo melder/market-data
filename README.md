@@ -26,11 +26,37 @@ A command-line tool for fetching financial data from multiple providers.
 
 ## Installation
 
+### Local Installation
+
 ```sh
 git clone https://github.com/melder/market-data.git
 cd market-data
 pip install -e .
 ```
+
+### Docker Installation
+
+Build and run the application using Docker Compose:
+
+```sh
+# Build the Docker image
+docker compose -f docker-claude-compose.yml build
+
+# Run the container with interactive shell
+docker compose -f docker-claude-compose.yml run --rm app
+
+# Or run in detached mode
+docker compose -f docker-claude-compose.yml up -d
+
+# Execute commands in running container
+docker compose -f docker-claude-compose.yml exec app python -m market_data.main --help
+```
+
+The Docker setup includes:
+- Python 3.13 with all dependencies
+- Claude Code CLI pre-installed
+- Interactive development environment
+- Persistent bash history and Claude configuration
 
 ## Setup
 
