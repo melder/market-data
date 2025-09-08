@@ -4,6 +4,14 @@
 .DS_Store
 Dockerfile.claude
 docker-claude-compose.yml
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+.tox
+.mypy_cache
 
 tmp/*
 !tmp/.keep

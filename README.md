@@ -36,7 +36,24 @@ pip install -e .
 
 ### Docker Installation
 
-Build and run the application using Docker Compose:
+#### Simple Docker Setup
+
+Build and run the application using the standard Dockerfile:
+
+```sh
+# Build the Docker image
+docker build -t market-data .
+
+# Run container with interactive terminal
+docker run -it --rm -v $(pwd)/csv:/app/csv market-data
+
+# Inside the container, run commands like:
+python -m market_data.main fetch-tickers --provider yfinance
+```
+
+#### Development Environment with Claude Code
+
+For development with Claude Code integration:
 
 ```sh
 # Build the Docker image
@@ -52,7 +69,7 @@ docker compose -f docker-claude-compose.yml up -d
 docker compose -f docker-claude-compose.yml exec app python -m market_data.main --help
 ```
 
-The Docker setup includes:
+The development setup includes:
 - Python 3.13 with all dependencies
 - Claude Code CLI pre-installed
 - Interactive development environment
