@@ -50,3 +50,19 @@ class OptionableFetcher(ABC):
       List of Ticker objects with optionable=True
     """
     pass
+
+class MetadataFetcher(ABC):
+  """Abstract base class for ticker metadata fetching functionality."""
+
+  @abstractmethod
+  def get_ticker_metadata(self, **kwargs: Any) -> list[Ticker]:
+    """Fetches enriched metadata for one or more tickers.
+
+    Args:
+      **kwargs: Provider-specific arguments (e.g., tickers, chunk_size)
+
+    Returns:
+      List of Ticker objects
+    """
+    pass
+

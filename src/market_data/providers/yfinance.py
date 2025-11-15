@@ -6,13 +6,77 @@ from typing import Any
 
 import pandas as pd
 import yfinance as yf
+from yfinance.data import YfData
+from yfinance.scrapers import quote
+
+try:
+  from curl_cffi import requests as curl_requests
+except ImportError:  # pragma: no cover - fallback for environments without curl_cffi
+  import requests as curl_requests  # type: ignore[assignment]
+
 from pydantic import ValidationError
 
-from market_data.interfaces import CandlesFetcher, OptionableFetcher, TickersFetcher
+from market_data.interfaces import (
+  CandlesFetcher,
+  MetadataFetcher,
+  OptionableFetcher,
+  TickersFetcher,
+)
 from market_data.models import Candle, Ticker
 from market_data.utils.parsers import read_csv_with_conventions
 
 # --- Ticker Fetching Logic ---
+
+_YFINANCE_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.166 Safari/537.36",
+}
+
+_YF_DATA_CLIENT: YfData | None = None
+
+
+def _get_yf_data_client() -> YfData:
+  global _YF_DATA_CLIENT
+  if _YF_DATA_CLIENT is None:
+    session = curl_requests.Session(impersonate="chrome")
+    session.headers.update(_YFINANCE_HEADERS)
+    _YF_DATA_CLIENT = YfData(session=session)
+  return _YF_DATA_CLIENT
+
+
+def _chunk_symbols(symbols: list[str], chunk_size: int) -> list[list[str]]:
+  if chunk_size <= 0:
+    chunk_size = 1
+  return [symbols[i : i + chunk_size] for i in range(0, len(symbols), chunk_size)]
+
+
+def _build_ticker_from_quote(raw_quote: dict[str, Any]) -> Ticker | None:
+  symbol = raw_quote.get("symbol")
+  if not symbol:
+    return None
+
+  ticker_payload = {
+    "ticker": symbol,
+    "name": raw_quote.get("longName") or raw_quote.get("shortName"),
+    "active": True,
+    "optionable": raw_quote.get("hasOptions"),
+    "market_cap": raw_quote.get("marketCap"),
+    "market": raw_quote.get("market"),
+    "locale": raw_quote.get("region"),
+    "type": raw_quote.get("quoteType"),
+    "primary_exchange": raw_quote.get("fullExchangeName"),
+    "currency_name": raw_quote.get("currency"),
+  }
+
+  try:
+    return Ticker.model_validate(ticker_payload)
+  except ValidationError as exc:
+    logging.debug(
+      "Skipping yfinance metadata for %s due to validation error: %s",
+      symbol,
+      exc,
+    )
+    return None
+
 
 _EXCHANGE_SOURCES = {
   "nasdaq": {
@@ -183,6 +247,87 @@ def _get_optionable_tickers_impl(**kwargs: Any) -> list[Ticker]:
   return optionable_tickers
 
 
+# --- Metadata Fetching Logic ---
+
+
+def _get_ticker_metadata_impl(**kwargs: Any) -> list[Ticker]:
+  tickers_param = kwargs.get("tickers")
+  if not tickers_param:
+    logging.warning("No tickers provided for yfinance metadata fetch.")
+    return []
+
+  if isinstance(tickers_param, str):
+    raw_tickers = [segment.strip() for segment in tickers_param.split(",")]
+  else:
+    raw_tickers = []
+    for value in tickers_param:
+      if isinstance(value, str):
+        raw_tickers.extend(segment.strip() for segment in value.split(","))
+
+  tickers_normalized = [ticker for ticker in (t.upper() for t in raw_tickers) if ticker]
+  if not tickers_normalized:
+    logging.warning("yfinance metadata received tickers but all were empty after normalization.")
+    return []
+
+  unique_tickers = list(dict.fromkeys(tickers_normalized))
+
+  try:
+    chunk_size = int(kwargs.get("chunk_size", 50))
+  except (TypeError, ValueError):
+    chunk_size = 50
+  if chunk_size <= 0:
+    chunk_size = 1
+
+  try:
+    delay = float(kwargs.get("delay", 0))
+  except (TypeError, ValueError):
+    delay = 0.0
+  if delay < 0:
+    delay = 0.0
+
+  logging.info(
+    "Fetching yfinance metadata for %d tickers (chunk size %d, delay %.2fs)",
+    len(unique_tickers),
+    chunk_size,
+    delay,
+  )
+
+  quote_url = f"{quote._QUERY1_URL_}/v7/finance/quote"
+  data_client = _get_yf_data_client()
+  metadata_map: dict[str, Ticker] = {}
+
+  chunks = _chunk_symbols(unique_tickers, chunk_size)
+  for index, chunk in enumerate(chunks, start=1):
+    params = {"symbols": ",".join(chunk)}
+    try:
+      payload = data_client.get_raw_json(quote_url, params=params)
+    except Exception as exc:  # noqa: BLE001 - propagate log but continue
+      logging.error("Failed to fetch yfinance metadata for chunk %s: %s", chunk, exc, exc_info=True)
+      continue
+
+    quotes = payload.get("quoteResponse", {}).get("result", [])
+    if not quotes:
+      logging.debug("yfinance metadata chunk %s returned no results", chunk)
+      continue
+
+    for raw_quote in quotes:
+      ticker_obj = _build_ticker_from_quote(raw_quote)
+      if ticker_obj:
+        metadata_map[ticker_obj.ticker] = ticker_obj
+
+    if delay and index < len(chunks):
+      time.sleep(delay)
+
+  missing = [ticker for ticker in unique_tickers if ticker not in metadata_map]
+  if missing:
+    logging.warning(
+      "yfinance metadata missing for tickers: %s",
+      ", ".join(missing),
+    )
+
+  return [metadata_map[ticker] for ticker in unique_tickers if ticker in metadata_map]
+
+
 # --- Candle Fetching Logic ---
 
 
@@ -235,6 +380,7 @@ class YFinanceProvider:
       TickersFetcher: _get_tickers_impl,
       CandlesFetcher: _get_candles_impl,
       OptionableFetcher: _get_optionable_tickers_impl,
+      MetadataFetcher: _get_ticker_metadata_impl,
     }
 
   def supports(self, interface_class: type) -> bool:

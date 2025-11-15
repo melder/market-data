@@ -36,6 +36,9 @@ class Ticker(BaseModel):
   optionable: bool | None = Field(
     default=None, description="Whether the ticker has options available for trading"
   )
+  market_cap: int | None = Field(
+    default=None, description="Latest reported market capitalization"
+  )
 
   @field_validator("name", mode="before")
   @classmethod
@@ -48,3 +51,4 @@ class Ticker(BaseModel):
     if isinstance(v, float) and math.isnan(v):
       return None
     return v
+

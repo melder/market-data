@@ -9,7 +9,7 @@ import click
 from dotenv import load_dotenv
 
 from market_data.factory import ProviderFactory
-from market_data.interfaces import CandlesFetcher, OptionableFetcher, TickersFetcher
+from market_data.interfaces import CandlesFetcher, MetadataFetcher, OptionableFetcher, TickersFetcher
 from market_data.utils.savers import save_to_csv
 
 # --- Setup ---
@@ -119,6 +119,162 @@ def fetch_candles(provider, ticker, from_date, to_date, timespan, multiplier):
   filename = f"{provider}_{ticker}_candles_{from_date}_to_{to_date}.csv"
   logging.info(f"Saving {len(candles)} candles to {filename}...")
   save_to_csv([c.model_dump() for c in candles], filename)
+
+
+@cli.command()
+@click.option(
+  "--provider", required=True, help="The data provider to use (e.g., yfinance)."
+)
+@click.option(
+  "--ticker",
+  "tickers",
+  multiple=True,
+  required=True,
+  help="Ticker symbol(s). Use multiple --ticker flags or comma-separated lists.",
+)
+@click.option(
+  "--chunk-size",
+  type=int,
+  default=50,
+  show_default=True,
+  help="Number of tickers to fetch per request batch.",
+)
+@click.option(
+  "--delay",
+  type=float,
+  default=0.0,
+  show_default=True,
+  help="Delay in seconds between batch requests.",
+)
+@cli_error_handler
+def fetch_metadata(provider: str, tickers: tuple[str, ...], chunk_size: int, delay: float) -> None:
+  """Fetch metadata such as market cap for one or more tickers."""
+  logging.info(f"Executing 'fetch-metadata' for provider: {provider}")
+
+  metadata_fetcher = _get_fetcher(provider, MetadataFetcher)
+
+  normalized: list[str] = []
+  for value in tickers:
+    normalized.extend(segment.strip().upper() for segment in value.split(',') if segment.strip())
+
+  if not normalized:
+    logging.warning("No valid ticker symbols were provided.")
+    return
+
+  unique_tickers = list(dict.fromkeys(normalized))
+  if not unique_tickers:
+    logging.warning("No unique tickers remained after normalization.")
+    return
+
+  metadata = metadata_fetcher(tickers=unique_tickers, chunk_size=chunk_size, delay=delay)
+
+  if not metadata:
+    logging.warning("No metadata was fetched.")
+    return
+
+  suffix = (
+    unique_tickers[0].lower()
+    if len(unique_tickers) == 1
+    else f"{len(unique_tickers)}"
+  )
+  filename = f"{provider}_{suffix}_metadata.csv"
+  logging.info(f"Saving metadata for {len(metadata)} tickers to {filename}...")
+  save_to_csv([item.model_dump() for item in metadata], filename)
+
+
+@cli.command()
+@click.option(
+  "--provider", required=True, help="The data provider to use (e.g., yfinance)."
+)
+@click.option(
+  "--exchange",
+  default=None,
+  help="The exchange to filter by (for providers that support it).",
+)
+@click.option(
+  "--limit",
+  type=int,
+  default=0,
+  show_default=True,
+  help="Maximum number of tickers to enrich (0 means all).",
+)
+@click.option(
+  "--chunk-size",
+  type=int,
+  default=50,
+  show_default=True,
+  help="Number of tickers to fetch per request batch.",
+)
+@click.option(
+  "--delay",
+  type=float,
+  default=0.0,
+  show_default=True,
+  help="Delay in seconds between batch requests.",
+)
+@cli_error_handler
+def fetch_tickers_metadata(provider: str, exchange: str | None, limit: int, chunk_size: int, delay: float) -> None:
+  """Fetch tickers, then enrich them with metadata in one pass."""
+  logging.info(f"Executing 'fetch-tickers-metadata' for provider: {provider}")
+
+  tickers_fetcher = _get_fetcher(provider, TickersFetcher)
+  metadata_fetcher = _get_fetcher(provider, MetadataFetcher)
+
+  tickers = tickers_fetcher(exchange=exchange)
+  if not tickers:
+    logging.warning("No tickers were fetched.")
+    return
+
+  symbol_order: list[str] = []
+  base_map: dict[str, dict] = {}
+  for ticker in tickers:
+    if limit and len(symbol_order) >= limit:
+      break
+    symbol = ticker.ticker.upper() if ticker.ticker else None
+    if not symbol or symbol in base_map:
+      continue
+    symbol_order.append(symbol)
+    base_map[symbol] = ticker.model_dump()
+
+  if not symbol_order:
+    logging.warning("Fetched tickers but no symbols were usable after normalization.")
+    return
+
+  metadata = metadata_fetcher(tickers=symbol_order, chunk_size=chunk_size, delay=delay)
+  if not metadata:
+    logging.warning("No metadata was fetched for the retrieved tickers.")
+    return
+
+  metadata_map = {item.ticker.upper(): item for item in metadata if item.ticker}
+  missing = [symbol for symbol in symbol_order if symbol not in metadata_map]
+  if missing:
+    logging.warning("Metadata missing for tickers: %s", ", ".join(missing[:10]) + ("..." if len(missing) > 10 else ""))
+
+  rows: list[dict] = []
+  for symbol in symbol_order:
+    base = base_map.get(symbol)
+    if not base:
+      continue
+    enriched = base.copy()
+    enriched_meta = metadata_map.get(symbol)
+    if enriched_meta:
+      meta_payload = enriched_meta.model_dump()
+      for key, value in meta_payload.items():
+        if value is not None:
+          enriched[key] = value
+    rows.append(enriched)
+
+  if not rows:
+    logging.warning("No rows remained after combining ticker metadata.")
+    return
+
+  filename = f"{provider}_{(exchange or 'all').lower()}_tickers_metadata.csv"
+  logging.info(
+    "Saving metadata-enriched tickers (%d rows) to %s...",
+    len(rows),
+    filename,
+  )
+  save_to_csv(rows, filename)
 
 
 @cli.command()
