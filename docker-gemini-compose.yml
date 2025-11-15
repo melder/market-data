@@ -1,0 +1,16 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.gemini
+    container_name: gemini-dev
+    environment:
+      HISTFILE: /app/tmp/.bash_history
+      XDG_CONFIG_HOME: /app/tmp/gemini
+      TERM: xterm-256color
+      COLORTERM: truecolor
+    volumes:
+      # Mount the application code from the current directory
+      - .:/app
+    tty: true
+    init: true
