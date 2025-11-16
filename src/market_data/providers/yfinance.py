@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -24,6 +25,9 @@ from market_data.interfaces import (
 )
 from market_data.models import Candle, Ticker
 from market_data.utils.parsers import read_csv_with_conventions
+
+# --- Module-level Constants ---
+_YFINANCE_DEFAULT_DELAY = 2.0
 
 # --- Ticker Fetching Logic ---
 
@@ -193,14 +197,14 @@ def _get_optionable_tickers_impl(**kwargs: Any) -> list[Ticker]:
     **kwargs: Same arguments as _get_tickers_impl (exchange, etc.)
     plus optional:
       - max_tickers: Maximum number of tickers to check (for testing)
-      - delay: Delay in seconds between requests (default: 1.5)
+      - delay: Delay in seconds between requests
 
   Returns:
     List of Ticker objects with optionable=True
   """
   # Get configuration
   max_tickers = kwargs.get("max_tickers")
-  delay = kwargs.get("delay", 1.5)
+  delay = kwargs.get("delay", _YFINANCE_DEFAULT_DELAY)
 
   logging.info("Starting optionable tickers fetch using yfinance")
   logging.info(f"Rate limiting: {delay} seconds between requests")
@@ -278,12 +282,7 @@ def _get_ticker_metadata_impl(**kwargs: Any) -> list[Ticker]:
   if chunk_size <= 0:
     chunk_size = 1
 
-  try:
-    delay = float(kwargs.get("delay", 0))
-  except (TypeError, ValueError):
-    delay = 0.0
-  if delay < 0:
-    delay = 0.0
+  delay = kwargs.get("delay", _YFINANCE_DEFAULT_DELAY)
 
   logging.info(
     "Fetching yfinance metadata for %d tickers (chunk size %d, delay %.2fs)",
@@ -301,6 +300,7 @@ def _get_ticker_metadata_impl(**kwargs: Any) -> list[Ticker]:
     params = {"symbols": ",".join(chunk)}
     try:
       payload = data_client.get_raw_json(quote_url, params=params)
+      logging.debug("yfinance metadata payload: %s", json.dumps(payload, indent=2))
     except Exception as exc:  # noqa: BLE001 - propagate log but continue
       logging.error("Failed to fetch yfinance metadata for chunk %s: %s", chunk, exc, exc_info=True)
       continue

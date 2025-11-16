@@ -9,7 +9,12 @@ from polygon import RESTClient
 from pydantic import ValidationError
 from requests.exceptions import HTTPError
 
-from market_data.interfaces import CandlesFetcher, OptionableFetcher, TickersFetcher
+from market_data.interfaces import (
+  CandlesFetcher,
+  MetadataFetcher,
+  OptionableFetcher,
+  TickersFetcher,
+)
 from market_data.models import Candle, Ticker
 
 # --- Module-level Constants ---
@@ -17,7 +22,7 @@ _MAX_CANDLE_LIMIT = 50000
 _TICKERS_PAGE_LIMIT = 1000
 _RATE_LIMIT_PAUSE_SECONDS = 12
 _OPTIONS_CONTRACTS_LIMIT = 1000  # Max per request for options contracts
-_MAX_RETRIES = 3  # Max retry attempts for rate limited requests
+_MAX_RETRIES = 5  # Max retry attempts for rate limited requests
 
 # --- Private Fetcher Implementations ---
 
@@ -138,6 +143,79 @@ def _get_optionable_tickers_impl(client: RESTClient, **kwargs: Any) -> list[Tick
   return valid_tickers
 
 
+def _get_ticker_metadata_impl(client: RESTClient, **kwargs: Any) -> list[Ticker]:
+  """Fetches enriched metadata for one or more tickers from Polygon.io.
+
+  This implementation iterates through each ticker and makes a separate API call.
+  It respects the delay parameter to avoid hitting rate limits.
+
+  Args:
+    client: The Polygon RESTClient.
+    **kwargs: Expects 'tickers' (a list of strings) and 'delay' (float).
+
+  Returns:
+    A list of Ticker objects with enriched metadata.
+  """
+  tickers_param = kwargs.get("tickers", [])
+  delay = kwargs.get("delay", _RATE_LIMIT_PAUSE_SECONDS)
+
+  if not tickers_param:
+    logging.warning("No tickers provided for Polygon metadata fetch.")
+    return []
+
+  logging.info(
+    "Fetching Polygon metadata for %d tickers (delay %.2fs)",
+    len(tickers_param),
+    delay,
+  )
+
+  metadata_list = []
+  for i, ticker_symbol in enumerate(tickers_param):
+    try:
+      logging.debug(f"Fetching metadata for {ticker_symbol} from Polygon.")
+      # The get_ticker_details is available through the client's reference attribute
+      details = client.get_ticker_details(ticker_symbol)
+
+      # Manually construct the Ticker object from the details response
+      ticker_obj = Ticker(
+        ticker=details.ticker,
+        name=details.name,
+        market=details.market,
+        locale=details.locale,
+        primary_exchange=details.primary_exchange,
+        type=details.type,
+        active=details.active,
+        currency_name=details.currency_name,
+        cik=details.cik,
+        market_cap=int(details.market_cap) if details.market_cap is not None else None,
+      )
+      metadata_list.append(ticker_obj)
+
+    except HTTPError as e:
+      if e.response.status_code == 404:
+        logging.warning(f"Ticker {ticker_symbol} not found on Polygon.io.")
+      else:
+        logging.error(
+          f"HTTP error fetching metadata for {ticker_symbol} from Polygon: {e}",
+          exc_info=True,
+        )
+    except ValidationError as e:
+      logging.warning(
+        f"Skipping Polygon metadata for {ticker_symbol} due to validation error: {e}"
+      )
+    except Exception as e:
+      logging.error(
+        f"An unexpected error occurred fetching metadata for {ticker_symbol}: {e}",
+        exc_info=True,
+      )
+
+    # Apply delay between requests, but not after the last one
+    if i < len(tickers_param) - 1:
+      time.sleep(delay)
+
+  return metadata_list
+
+
 # --- Public Provider Class ---
 
 
@@ -146,12 +224,13 @@ class PolygonProvider:
     if not api_key:
       raise ValueError("Polygon provider requires an API key.")
 
-    client = RESTClient(api_key)
+    client = RESTClient(api_key, retries=_MAX_RETRIES)
 
     self._capabilities = {
       TickersFetcher: functools.partial(_get_tickers_impl, client=client),
       CandlesFetcher: functools.partial(_get_candles_impl, client=client),
       OptionableFetcher: functools.partial(_get_optionable_tickers_impl, client=client),
+      MetadataFetcher: functools.partial(_get_ticker_metadata_impl, client=client),
     }
 
   def supports(self, interface_class: type) -> bool:

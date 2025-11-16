@@ -9,12 +9,17 @@ import click
 from dotenv import load_dotenv
 
 from market_data.factory import ProviderFactory
-from market_data.interfaces import CandlesFetcher, MetadataFetcher, OptionableFetcher, TickersFetcher
+from market_data.interfaces import (
+  CandlesFetcher,
+  MetadataFetcher,
+  OptionableFetcher,
+  TickersFetcher,
+)
 from market_data.utils.savers import save_to_csv
 
 # --- Setup ---
 logging.basicConfig(
-  level=logging.INFO,
+  level=logging.DEBUG,
   format="%(asctime)s - %(levelname)s - %(message)s",
   stream=sys.stdout,
 )
@@ -129,8 +134,7 @@ def fetch_candles(provider, ticker, from_date, to_date, timespan, multiplier):
   "--ticker",
   "tickers",
   multiple=True,
-  required=True,
-  help="Ticker symbol(s). Use multiple --ticker flags or comma-separated lists.",
+  help="Ticker symbol(s). If not provided, fetches metadata for all available tickers.",
 )
 @click.option(
   "--chunk-size",
@@ -142,40 +146,61 @@ def fetch_candles(provider, ticker, from_date, to_date, timespan, multiplier):
 @click.option(
   "--delay",
   type=float,
-  default=0.0,
-  show_default=True,
-  help="Delay in seconds between batch requests.",
+  default=None,
+  help="Delay in seconds between batch requests. Defaults to provider-specific value.",
 )
 @cli_error_handler
-def fetch_metadata(provider: str, tickers: tuple[str, ...], chunk_size: int, delay: float) -> None:
+def fetch_metadata(
+  provider: str, tickers: tuple[str, ...], chunk_size: int, delay: float
+) -> None:
   """Fetch metadata such as market cap for one or more tickers."""
   logging.info(f"Executing 'fetch-metadata' for provider: {provider}")
 
   metadata_fetcher = _get_fetcher(provider, MetadataFetcher)
 
-  normalized: list[str] = []
-  for value in tickers:
-    normalized.extend(segment.strip().upper() for segment in value.split(',') if segment.strip())
+  symbols_to_fetch: list[str] = []
+  if tickers:
+    # If tickers are provided, normalize them
+    for value in tickers:
+      symbols_to_fetch.extend(
+        segment.strip().upper() for segment in value.split(",") if segment.strip()
+      )
+  else:
+    # If no tickers are provided, fetch all tickers from the provider
+    logging.warning(
+      f"No tickers provided. Fetching all available tickers from '{provider}' first. This may be very slow."
+    )
+    tickers_fetcher = _get_fetcher(provider, TickersFetcher)
+    all_provider_tickers = tickers_fetcher(exchange=None)
+    symbols_to_fetch = [t.ticker for t in all_provider_tickers if t.ticker]
 
-  if not normalized:
-    logging.warning("No valid ticker symbols were provided.")
+  if not symbols_to_fetch:
+    logging.warning("No valid ticker symbols were provided or found.")
     return
 
-  unique_tickers = list(dict.fromkeys(normalized))
+  unique_tickers = list(dict.fromkeys(symbols_to_fetch))
   if not unique_tickers:
     logging.warning("No unique tickers remained after normalization.")
     return
 
-  metadata = metadata_fetcher(tickers=unique_tickers, chunk_size=chunk_size, delay=delay)
+  fetcher_kwargs = {"tickers": unique_tickers, "chunk_size": chunk_size}
+  if delay is not None:
+    fetcher_kwargs["delay"] = delay
+
+  metadata = metadata_fetcher(**fetcher_kwargs)
 
   if not metadata:
     logging.warning("No metadata was fetched.")
     return
 
   suffix = (
-    unique_tickers[0].lower()
-    if len(unique_tickers) == 1
-    else f"{len(unique_tickers)}"
+    "all"
+    if not tickers
+    else (
+      unique_tickers[0].lower()
+      if len(unique_tickers) == 1
+      else f"{len(unique_tickers)}"
+    )
   )
   filename = f"{provider}_{suffix}_metadata.csv"
   logging.info(f"Saving metadata for {len(metadata)} tickers to {filename}...")
@@ -208,12 +233,13 @@ def fetch_metadata(provider: str, tickers: tuple[str, ...], chunk_size: int, del
 @click.option(
   "--delay",
   type=float,
-  default=0.0,
-  show_default=True,
-  help="Delay in seconds between batch requests.",
+  default=None,
+  help="Delay in seconds between batch requests. Defaults to provider-specific value.",
 )
 @cli_error_handler
-def fetch_tickers_metadata(provider: str, exchange: str | None, limit: int, chunk_size: int, delay: float) -> None:
+def fetch_tickers_metadata(
+  provider: str, exchange: str | None, limit: int, chunk_size: int, delay: float
+) -> None:
   """Fetch tickers, then enrich them with metadata in one pass."""
   logging.info(f"Executing 'fetch-tickers-metadata' for provider: {provider}")
 
@@ -240,7 +266,11 @@ def fetch_tickers_metadata(provider: str, exchange: str | None, limit: int, chun
     logging.warning("Fetched tickers but no symbols were usable after normalization.")
     return
 
-  metadata = metadata_fetcher(tickers=symbol_order, chunk_size=chunk_size, delay=delay)
+  fetcher_kwargs = {"tickers": symbol_order, "chunk_size": chunk_size}
+  if delay is not None:
+    fetcher_kwargs["delay"] = delay
+
+  metadata = metadata_fetcher(**fetcher_kwargs)
   if not metadata:
     logging.warning("No metadata was fetched for the retrieved tickers.")
     return
@@ -248,7 +278,10 @@ def fetch_tickers_metadata(provider: str, exchange: str | None, limit: int, chun
   metadata_map = {item.ticker.upper(): item for item in metadata if item.ticker}
   missing = [symbol for symbol in symbol_order if symbol not in metadata_map]
   if missing:
-    logging.warning("Metadata missing for tickers: %s", ", ".join(missing[:10]) + ("..." if len(missing) > 10 else ""))
+    logging.warning(
+      "Metadata missing for tickers: %s",
+      ", ".join(missing[:10]) + ("..." if len(missing) > 10 else ""),
+    )
 
   rows: list[dict] = []
   for symbol in symbol_order:
@@ -298,8 +331,8 @@ def fetch_tickers_metadata(provider: str, exchange: str | None, limit: int, chun
 @click.option(
   "--delay",
   type=float,
-  default=1.5,
-  help="Delay in seconds between requests (yfinance only, default: 1.5).",
+  default=None,
+  help="Delay in seconds between requests. Defaults to provider-specific value.",
 )
 @cli_error_handler
 def fetch_optionable_tickers(
@@ -316,7 +349,7 @@ def fetch_optionable_tickers(
     kwargs["exchange"] = exchange
   if max_tickers:
     kwargs["max_tickers"] = max_tickers
-  if provider == "yfinance":
+  if delay is not None:
     kwargs["delay"] = delay
 
   tickers = get_optionable_func(**kwargs)
